@@ -12,7 +12,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hwpxLabel = NSTextField(labelWithString: "선택되지 않음")
     private let coverLabel = NSTextField(labelWithString: "선택되지 않음")
     private let outputLabel = NSTextField(labelWithString: "HWPX 파일과 같은 폴더")
+    private let inputModePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let templatePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let duplicatePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let sourceButton = NSButton(title: "HWPX 선택", target: nil, action: nil)
     private let statusLabel = NSTextField(labelWithString: "HWPX와 표지를 선택해 주세요.")
     private let titleField = NSTextField(string: "")
     private let authorField = NSTextField(string: "")
@@ -76,12 +79,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let subtitle = NSTextField(labelWithString: "HWPX 원고와 표지 이미지로 TXT와 EPUB을 함께 만듭니다.")
         subtitle.textColor = .secondaryLabelColor
 
-        let hwpxButton = fileButton("HWPX 선택", #selector(selectHWPX))
+        sourceButton.target = self
+        sourceButton.action = #selector(selectHWPX)
+        sourceButton.bezelStyle = .rounded
         let coverButton = fileButton("표지 선택", #selector(selectCover))
         let outputButton = fileButton("출력 폴더", #selector(selectOutput))
+        inputModePopup.addItems(withTitles: ["개별 HWPX", "연재 폴더 일괄"])
+        inputModePopup.target = self
+        inputModePopup.action = #selector(inputModeChanged)
         templatePopup.addItems(withTitles: ["단행본형", "연재형"])
         templatePopup.target = self
         templatePopup.action = #selector(templateChanged)
+        duplicatePopup.addItems(withTitles: ["기존 파일 모두 대치", "기존 파일 건너뛰기"])
 
         [hwpxLabel, coverLabel, outputLabel].forEach {
             $0.lineBreakMode = .byTruncatingMiddle
@@ -89,10 +98,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let form = NSGridView(views: [
-            [hwpxButton, hwpxLabel],
+            [NSTextField(labelWithString: "입력 방식"), inputModePopup],
+            [sourceButton, hwpxLabel],
             [coverButton, coverLabel],
             [outputButton, outputLabel],
             [NSTextField(labelWithString: "출력 형식"), templatePopup],
+            [NSTextField(labelWithString: "중복 처리"), duplicatePopup],
         ])
         form.rowSpacing = 14
         form.columnSpacing = 14
@@ -164,6 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
         loadCopyrightInfo()
+        inputModeChanged()
         templateChanged()
     }
 
@@ -175,13 +187,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func selectHWPX() {
         let panel = NSOpenPanel()
-        panel.allowedFileTypes = ["hwpx"]
+        let isBatch = inputModePopup.indexOfSelectedItem == 1
+        panel.allowedFileTypes = isBatch ? nil : ["hwpx"]
+        panel.canChooseFiles = !isBatch
+        panel.canChooseDirectories = isBatch
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
             hwpxURL = url
             hwpxLabel.stringValue = url.path
-            if outputURL == nil { outputLabel.stringValue = url.deletingLastPathComponent().path }
+            if outputURL == nil {
+                outputLabel.stringValue = isBatch ? url.path : url.deletingLastPathComponent().path
+            }
         }
+    }
+
+    @objc private func inputModeChanged() {
+        let isBatch = inputModePopup.indexOfSelectedItem == 1
+        hwpxURL = nil
+        hwpxLabel.stringValue = "선택되지 않음"
+        sourceButton.title = isBatch ? "원고 폴더 선택" : "HWPX 선택"
+        duplicatePopup.isEnabled = isBatch
+        if isBatch {
+            templatePopup.selectItem(at: 1)
+            templatePopup.isEnabled = false
+        } else {
+            templatePopup.isEnabled = true
+        }
+        templateChanged()
     }
 
     @objc private func selectCover() {
@@ -218,10 +250,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startConversion(overwrite: Bool) {
         guard let hwpx = hwpxURL, let cover = coverURL else {
-            showAlert("HWPX 파일과 표지 이미지를 모두 선택해 주세요.")
+            showAlert("HWPX 파일 또는 원고 폴더와 표지 이미지를 모두 선택해 주세요.")
             return
         }
-        let output = outputURL ?? hwpx.deletingLastPathComponent()
+        let isBatch = inputModePopup.indexOfSelectedItem == 1
+        let output = outputURL ?? (isBatch ? hwpx : hwpx.deletingLastPathComponent())
         guard let engine = Bundle.main.url(forResource: "epub_engine", withExtension: nil) else {
             showAlert("앱 내부 변환 엔진을 찾지 못했습니다.")
             return
@@ -230,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         convertButton.isEnabled = false
         setResultButtons(enabled: false)
         spinner.startAnimation(nil)
-        statusLabel.stringValue = "변환 중입니다…"
+        statusLabel.stringValue = isBatch ? "연재 원고를 일괄 변환 중입니다…" : "변환 중입니다…"
         let copyrightArguments = [
             "--title", titleField.stringValue,
             "--author", authorField.stringValue,
@@ -240,17 +273,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "--rights", rightsField.stringValue,
             "--template", templatePopup.indexOfSelectedItem == 1 ? "serial" : "book",
         ] + (overwrite ? ["--overwrite"] : [])
+        let sourceArguments = isBatch ? ["--batch-dir", hwpx.path] : ["--hwpx", hwpx.path]
+        let batchArguments = isBatch ? [
+            "--existing-policy", duplicatePopup.indexOfSelectedItem == 0 ? "overwrite" : "skip"
+        ] : []
 
         DispatchQueue.global(qos: .userInitiated).async {
             let process = Process()
             let outputPipe = Pipe()
             let errorPipe = Pipe()
             process.executableURL = engine
-            process.arguments = [
-                "--hwpx", hwpx.path,
+            process.arguments = sourceArguments + [
                 "--cover", cover.path,
                 "--output-dir", output.path,
-            ] + copyrightArguments
+            ] + copyrightArguments + batchArguments
             process.standardOutput = outputPipe
             process.standardError = errorPipe
             do {
@@ -262,17 +298,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.spinner.stopAnimation(nil)
                     self.convertButton.isEnabled = true
                     if process.terminationStatus == 0 {
+                        var summary: (Int, Int, Int)?
                         for line in stdout.split(separator: "\n") {
                             if line.hasPrefix("TXT=") {
                                 self.txtURL = URL(fileURLWithPath: String(line.dropFirst(4)))
                             } else if line.hasPrefix("EPUB=") {
                                 self.epubURL = URL(fileURLWithPath: String(line.dropFirst(5)))
+                            } else if line.hasPrefix("SUMMARY=") {
+                                let values = line.dropFirst(8).split(separator: "|").compactMap { Int($0) }
+                                if values.count == 3 { summary = (values[0], values[1], values[2]) }
                             }
                         }
-                        self.statusLabel.stringValue = overwrite
-                            ? "완료되었습니다. 기존 TXT와 EPUB을 대치했습니다."
-                            : "완료되었습니다. TXT와 EPUB을 저장했습니다."
-                        self.setResultButtons(enabled: true)
+                        if let result = summary {
+                            self.statusLabel.stringValue = "일괄 변환 완료: 성공 \(result.0)개, 건너뜀 \(result.1)개"
+                            self.openTXTButton.isEnabled = false
+                            self.openEPUBButton.isEnabled = false
+                            self.revealButton.isEnabled = true
+                        } else {
+                            self.statusLabel.stringValue = overwrite
+                                ? "완료되었습니다. 기존 TXT와 EPUB을 대치했습니다."
+                                : "완료되었습니다. TXT와 EPUB을 저장했습니다."
+                            self.setResultButtons(enabled: true)
+                        }
                     } else {
                         let message = stderr.isEmpty ? stdout : stderr
                         if message.contains("이미 존재하는 파일:") {
@@ -339,7 +386,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openTXT() { if let url = txtURL { NSWorkspace.shared.open(url) } }
     @objc private func openEPUB() { if let url = epubURL { NSWorkspace.shared.open(url) } }
     @objc private func revealResults() {
-        if let url = epubURL { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        if inputModePopup.indexOfSelectedItem == 1, let folder = outputURL ?? hwpxURL {
+            NSWorkspace.shared.open(folder)
+        } else if let url = epubURL {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
     }
 
     @objc private func showLicenses() {

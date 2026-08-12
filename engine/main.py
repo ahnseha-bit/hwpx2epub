@@ -9,6 +9,7 @@ import unicodedata
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Optional
 
 from ebooklib import epub
 from txt_to_epub.core import (
@@ -217,9 +218,55 @@ def build_serial_epub(txt_path: Path, cover_path: Path, epub_path: Path) -> None
     _write_epub_file(str(epub_path), book)
 
 
+def convert_one(
+    hwpx_path: Path,
+    cover_path: Path,
+    output_dir: Path,
+    template: str,
+    copyright_values: dict[str, str],
+    existing_policy: str,
+) -> Optional[tuple[Path, Path]]:
+    """Convert one manuscript, or return None when an existing result is skipped."""
+    temporary_txt_path = output_dir / f".{hwpx_path.stem}.hwpx-epub-maker.tmp.txt"
+    hwpx_to_txt(hwpx_path, temporary_txt_path)
+    extracted_text = temporary_txt_path.read_text(encoding='utf-8')
+    if template == 'serial':
+        output_stem = _safe_output_stem(
+            detect_serial_heading(extracted_text, hwpx_path.stem),
+            hwpx_path.stem,
+        )
+    else:
+        output_stem = hwpx_path.stem
+    txt_path = output_dir / f"{output_stem}.txt"
+    epub_path = output_dir / f"{output_stem}.epub"
+    existing = [path for path in (txt_path, epub_path) if path.exists()]
+    if existing and existing_policy == 'skip':
+        temporary_txt_path.unlink(missing_ok=True)
+        print(f"SKIPPED={hwpx_path.name}", flush=True)
+        return None
+    if existing and existing_policy == 'error':
+        temporary_txt_path.unlink(missing_ok=True)
+        raise FileExistsError('이미 존재하는 파일: ' + ', '.join(path.name for path in existing))
+
+    temporary_txt_path.replace(txt_path)
+    source_text = txt_path.read_text(encoding='utf-8')
+    source_text = apply_copyright_form(source_text, copyright_values, hwpx_path.stem)
+    with txt_path.open('w', encoding='utf-8', newline='\n') as output:
+        output.write(source_text)
+    if template == 'serial':
+        build_serial_epub(txt_path, cover_path, epub_path)
+    else:
+        build_book_epub(txt_path, cover_path, epub_path)
+    print(f"TXT={txt_path}", flush=True)
+    print(f"EPUB={epub_path}", flush=True)
+    return txt_path, epub_path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--hwpx", required=True)
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument("--hwpx")
+    source_group.add_argument("--batch-dir")
     parser.add_argument("--cover", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--title", default="")
@@ -230,37 +277,17 @@ def main() -> int:
     parser.add_argument("--rights", default="")
     parser.add_argument("--template", choices=('book', 'serial'), default='book')
     parser.add_argument("--overwrite", action='store_true')
+    parser.add_argument("--existing-policy", choices=('error', 'overwrite', 'skip'), default='error')
     args = parser.parse_args()
 
-    hwpx_path = Path(args.hwpx).expanduser().resolve()
     cover_path = Path(args.cover).expanduser().resolve()
     output_dir = Path(args.output_dir).expanduser().resolve()
-    if not hwpx_path.is_file():
-        raise FileNotFoundError(f"HWPX 파일을 찾을 수 없습니다: {hwpx_path}")
     if not cover_path.is_file():
         raise FileNotFoundError(f"표지 파일을 찾을 수 없습니다: {cover_path}")
     if cover_path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
         raise ValueError("표지는 PNG, JPG 또는 WEBP 파일이어야 합니다.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    print("HWPX에서 TXT를 추출하고 있습니다…", flush=True)
-    temporary_txt_path = output_dir / f".{hwpx_path.stem}.hwpx-epub-maker.tmp.txt"
-    hwpx_to_txt(hwpx_path, temporary_txt_path)
-    extracted_text = temporary_txt_path.read_text(encoding='utf-8')
-    if args.template == 'serial':
-        output_stem = _safe_output_stem(
-            detect_serial_heading(extracted_text, hwpx_path.stem),
-            hwpx_path.stem,
-        )
-    else:
-        output_stem = hwpx_path.stem
-    txt_path = output_dir / f"{output_stem}.txt"
-    epub_path = output_dir / f"{output_stem}.epub"
-    existing = [path for path in (txt_path, epub_path) if path.exists()]
-    if existing and not args.overwrite:
-        temporary_txt_path.unlink(missing_ok=True)
-        raise FileExistsError('이미 존재하는 파일: ' + ', '.join(path.name for path in existing))
-    temporary_txt_path.replace(txt_path)
     copyright_values = {
         'title': args.title,
         'author': args.author,
@@ -269,17 +296,43 @@ def main() -> int:
         'uci': args.uci,
         'rights': args.rights,
     }
-    source_text = txt_path.read_text(encoding='utf-8')
-    source_text = apply_copyright_form(source_text, copyright_values, hwpx_path.stem)
-    with txt_path.open('w', encoding='utf-8', newline='\n') as output:
-        output.write(source_text)
-    print("EPUB을 만들고 있습니다…", flush=True)
-    if args.template == 'serial':
-        build_serial_epub(txt_path, cover_path, epub_path)
-    else:
-        build_book_epub(txt_path, cover_path, epub_path)
-    print(f"TXT={txt_path}", flush=True)
-    print(f"EPUB={epub_path}", flush=True)
+    policy = 'overwrite' if args.overwrite else args.existing_policy
+
+    if args.batch_dir:
+        if args.template != 'serial':
+            raise ValueError("폴더 일괄 처리는 연재형에서만 사용할 수 있습니다.")
+        batch_dir = Path(args.batch_dir).expanduser().resolve()
+        if not batch_dir.is_dir():
+            raise FileNotFoundError(f"원고 폴더를 찾을 수 없습니다: {batch_dir}")
+        manuscripts = sorted(
+            (path for path in batch_dir.iterdir() if path.is_file() and path.suffix.lower() == '.hwpx'),
+            key=lambda path: unicodedata.normalize('NFC', path.name),
+        )
+        if not manuscripts:
+            raise ValueError("선택한 폴더에 HWPX 파일이 없습니다.")
+        completed = skipped = 0
+        failures: list[str] = []
+        for index, hwpx_path in enumerate(manuscripts, 1):
+            print(f"PROGRESS={index}/{len(manuscripts)}|{hwpx_path.name}", flush=True)
+            try:
+                result = convert_one(hwpx_path, cover_path, output_dir, 'serial', copyright_values, policy)
+                if result is None:
+                    skipped += 1
+                else:
+                    completed += 1
+            except Exception as error:
+                failures.append(f"{hwpx_path.name}: {error}")
+                print(f"FAILED={hwpx_path.name}|{error}", file=sys.stderr, flush=True)
+        print(f"SUMMARY={completed}|{skipped}|{len(failures)}", flush=True)
+        if failures:
+            raise RuntimeError(f"{len(failures)}개 파일 변환 실패:\n" + '\n'.join(failures))
+        return 0
+
+    hwpx_path = Path(args.hwpx).expanduser().resolve()
+    if not hwpx_path.is_file():
+        raise FileNotFoundError(f"HWPX 파일을 찾을 수 없습니다: {hwpx_path}")
+    print("HWPX에서 TXT를 추출하고 있습니다…", flush=True)
+    convert_one(hwpx_path, cover_path, output_dir, args.template, copyright_values, policy)
     return 0
 
 
