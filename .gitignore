@@ -23,6 +23,7 @@ share/python-wheels/
 MANIFEST
 
 # Virtual environments
+.build-venv/
 venv/
 env/
 ENV/
@@ -74,9 +75,16 @@ dmypy.json
 
 # Output files
 *.epub
+*.hwpx
 *.txt
 !requirements.txt
 !examples/*.txt
+!THIRD_PARTY_NOTICES.txt
+!licenses/*.txt
+
+# App build and local conversion fixtures
+test-output*/
+test-overwrite/
 
 # Logs
 *.log

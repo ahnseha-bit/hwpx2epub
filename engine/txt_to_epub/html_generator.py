@@ -445,3 +445,30 @@ def create_chapter(title: str, content: str, file_name: str, illustration_href: 
         '''
     
     return chapter
+
+
+def create_serial_episode(title: str, subtitle: str, content: str,
+                          file_name: str = "episode.xhtml",
+                          language: str = "ko") -> epub.EpubHtml:
+    """Create a single serial episode with a distinct title and subtitle."""
+    language = _normalize_epub_language(language)
+    page = epub.EpubHtml(title=title, file_name=file_name, lang=language)
+    safe_title = _escape_text(title)
+    safe_subtitle = _escape_text(subtitle)
+    rendered_content = _render_text_blocks(content)
+    page.content = f'''<!DOCTYPE html>
+    <html lang="{language}">
+    <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <title>{safe_title}</title>
+    </head>
+    <body class="chinese-text">
+        <div style="font-size: 1.7em; font-weight: 700; margin: 0 0 1.1em 0;">{safe_title}</div>
+        <div style="font-size: 1.25em; font-weight: 600; margin: 0 0 2em 0;">{safe_subtitle}</div>
+        <div style="margin-top: 1.5rem;">
+            {rendered_content}
+        </div>
+    </body>
+    </html>'''
+    return page

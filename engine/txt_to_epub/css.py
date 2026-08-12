@@ -83,7 +83,7 @@ def add_css_style(book: epub.EpubBook) -> None:
         background: #fefefe;
         padding: 0 0.5rem;
     }
-    
+
     /* =====================================
        节标题样式 (低级别)
        ===================================== */
