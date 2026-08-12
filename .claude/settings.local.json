@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m pytest:*)",
+      "Bash(python3:*)",
+      "Bash(tree:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(unzip:*)",
+      "Bash(python debug_chapter_order.py:*)",
+      "Bash(ls:*)",
+      "Bash(done)"
+    ]
+  }
+}
