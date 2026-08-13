@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let publisherField = NSTextField(string: "")
     private let dateField = NSTextField(string: "")
     private let uciField = NSTextField(string: "")
+    private let submissionEmailField = NSTextField(string: "")
     private let rightsField = NSTextField(string: "")
     private let saveCopyrightButton = NSButton(title: "판권정보 저장하기", target: nil, action: nil)
     private let convertButton = NSButton(title: "TXT + EPUB 만들기", target: nil, action: nil)
@@ -120,12 +121,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             [NSTextField(labelWithString: "발행처"), publisherField],
             [NSTextField(labelWithString: "발행일"), dateField],
             [NSTextField(labelWithString: "UCI"), uciField],
+            [NSTextField(labelWithString: "투고메일"), submissionEmailField],
             [NSTextField(labelWithString: "저작권 문구"), rightsField],
         ])
         copyrightForm.rowSpacing = 8
         copyrightForm.columnSpacing = 14
         copyrightForm.column(at: 0).width = 110
-        [titleField, authorField, publisherField, dateField, uciField, rightsField].forEach {
+        [titleField, authorField, publisherField, dateField, uciField, submissionEmailField, rightsField].forEach {
             $0.placeholderString = "선택 입력"
         }
         saveCopyrightButton.target = self
@@ -270,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "--publisher", publisherField.stringValue,
             "--date", dateField.stringValue,
             "--uci", uciField.stringValue,
+            "--submission-email", submissionEmailField.stringValue,
             "--rights", rightsField.stringValue,
             "--template", templatePopup.indexOfSelectedItem == 1 ? "serial" : "book",
         ] + (overwrite ? ["--overwrite"] : [])
@@ -364,6 +367,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ("copyright.publisher", publisherField),
             ("copyright.date", dateField),
             ("copyright.uci", uciField),
+            ("copyright.submissionEmail", submissionEmailField),
             ("copyright.rights", rightsField),
         ]
     }

@@ -169,6 +169,7 @@ def _extract_copyright_metadata(content: str) -> Dict[str, str]:
         '발행처': 'publisher',
         '발행일': 'date',
         'UCI': 'identifier',
+        '투고메일': 'submission_email',
         '저작권 문구': 'rights',
     }
     extracted: Dict[str, str] = {}
@@ -462,6 +463,8 @@ def _build_copyright_page_content(title: str, author: str, metadata: Dict[str, A
         lines.append(f"발행일: {metadata['date']}")
     if metadata.get("identifier"):
         lines.append(f"식별자: {metadata['identifier']}")
+    if metadata.get("submission_email"):
+        lines.append(f"투고메일: {metadata['submission_email']}")
     if metadata.get("rights"):
         lines.append(str(metadata["rights"]))
     return "\n\n".join(lines) or "All rights reserved."

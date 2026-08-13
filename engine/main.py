@@ -85,6 +85,7 @@ def apply_copyright_form(text: str, values: dict[str, str], fallback_title: str)
         ('발행처', 'publisher'),
         ('발행일', 'date'),
         ('UCI', 'uci'),
+        ('투고메일', 'submission_email'),
         ('저작권 문구', 'rights'),
     ]
     fallbacks = {
@@ -93,6 +94,7 @@ def apply_copyright_form(text: str, values: dict[str, str], fallback_title: str)
         'publisher': existing.get('발행처', ''),
         'date': existing.get('발행일', ''),
         'uci': existing.get('UCI', ''),
+        'submission_email': existing.get('투고메일', ''),
         'rights': existing.get('저작권 문구', ''),
     }
     lines = ['판권']
@@ -136,6 +138,7 @@ def _copyright_content(metadata: dict[str, str]) -> str:
         ('발행처', metadata.get('publisher', '')),
         ('발행일', metadata.get('date', '')),
         ('UCI', metadata.get('identifier', '')),
+        ('투고메일', metadata.get('submission_email', '')),
         ('저작권 문구', metadata.get('rights', '')),
     ]
     return '\n\n'.join(f'{label}: {value}' for label, value in fields)
@@ -193,6 +196,7 @@ def build_serial_epub(txt_path: Path, cover_path: Path, epub_path: Path) -> None
         'date': metadata.get('date', ''),
         'rights': metadata.get('rights', ''),
         'identifier': metadata.get('identifier', ''),
+        'submission_email': metadata.get('submission_email', ''),
     }
     book = _create_epub_book(
         title=title,
@@ -274,6 +278,7 @@ def main() -> int:
     parser.add_argument("--publisher", default="")
     parser.add_argument("--date", default="")
     parser.add_argument("--uci", default="")
+    parser.add_argument("--submission-email", default="")
     parser.add_argument("--rights", default="")
     parser.add_argument("--template", choices=('book', 'serial'), default='book')
     parser.add_argument("--overwrite", action='store_true')
@@ -294,6 +299,7 @@ def main() -> int:
         'publisher': args.publisher,
         'date': args.date,
         'uci': args.uci,
+        'submission_email': args.submission_email,
         'rights': args.rights,
     }
     policy = 'overwrite' if args.overwrite else args.existing_policy
