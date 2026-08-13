@@ -97,11 +97,13 @@ def apply_copyright_form(text: str, values: dict[str, str], fallback_title: str)
         'submission_email': existing.get('투고문의', existing.get('투고메일', '')),
         'rights': existing.get('저작권 문구', ''),
     }
-    lines = ['판권']
+    fields = []
     for label, key in labels:
         value = values.get(key, '').strip() or fallbacks[key]
-        lines.append(f'{label}: {value}')
-    return f"{text}\n\n" + "\n".join(lines) + "\n"
+        fields.append(f'{label}: {value}')
+    # Keep copyright fields as separate paragraphs. This makes book EPUBs use
+    # the same one-blank-line spacing as the dedicated serial copyright page.
+    return f"{text}\n\n판권\n" + "\n\n".join(fields) + "\n"
 
 
 def build_book_epub(txt_path: Path, cover_path: Path, epub_path: Path) -> None:
