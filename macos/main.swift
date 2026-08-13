@@ -85,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sourceButton.bezelStyle = .rounded
         let coverButton = fileButton("표지 선택", #selector(selectCover))
         let outputButton = fileButton("출력 폴더", #selector(selectOutput))
-        inputModePopup.addItems(withTitles: ["개별 HWPX", "연재 폴더 일괄"])
+        inputModePopup.addItems(withTitles: ["개별 HWPX", "폴더 일괄 처리"])
         inputModePopup.target = self
         inputModePopup.action = #selector(inputModeChanged)
         templatePopup.addItems(withTitles: ["단행본형", "연재형"])
@@ -209,12 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hwpxLabel.stringValue = "선택되지 않음"
         sourceButton.title = isBatch ? "원고 폴더 선택" : "HWPX 선택"
         duplicatePopup.isEnabled = isBatch
-        if isBatch {
-            templatePopup.selectItem(at: 1)
-            templatePopup.isEnabled = false
-        } else {
-            templatePopup.isEnabled = true
-        }
+        templatePopup.isEnabled = true
         templateChanged()
     }
 
@@ -265,7 +260,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         convertButton.isEnabled = false
         setResultButtons(enabled: false)
         spinner.startAnimation(nil)
-        statusLabel.stringValue = isBatch ? "연재 원고를 일괄 변환 중입니다…" : "변환 중입니다…"
+        let templateName = templatePopup.indexOfSelectedItem == 1 ? "연재형" : "단행본형"
+        statusLabel.stringValue = isBatch ? "\(templateName) 원고를 일괄 변환 중입니다…" : "변환 중입니다…"
         let copyrightArguments = [
             "--title", titleField.stringValue,
             "--author", authorField.stringValue,

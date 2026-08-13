@@ -181,6 +181,16 @@ def detect_serial_heading(text: str, fallback_title: str) -> str:
     return heading
 
 
+def detect_first_heading(text: str, fallback_title: str) -> str:
+    """Return the first non-empty manuscript line for book output naming."""
+    normalized = unicodedata.normalize('NFC', text)
+    for line in normalized.splitlines():
+        heading = line.strip()
+        if heading:
+            return heading
+    return fallback_title
+
+
 def build_serial_epub(txt_path: Path, cover_path: Path, epub_path: Path) -> None:
     """Create a lightweight serial EPUB: cover -> one episode -> copyright."""
     source = unicodedata.normalize('NFC', txt_path.read_text(encoding='utf-8-sig'))
@@ -234,13 +244,12 @@ def convert_one(
     temporary_txt_path = output_dir / f".{hwpx_path.stem}.hwpx-epub-maker.tmp.txt"
     hwpx_to_txt(hwpx_path, temporary_txt_path)
     extracted_text = temporary_txt_path.read_text(encoding='utf-8')
-    if template == 'serial':
-        output_stem = _safe_output_stem(
-            detect_serial_heading(extracted_text, hwpx_path.stem),
-            hwpx_path.stem,
-        )
-    else:
-        output_stem = hwpx_path.stem
+    detected_heading = (
+        detect_serial_heading(extracted_text, hwpx_path.stem)
+        if template == 'serial'
+        else detect_first_heading(extracted_text, hwpx_path.stem)
+    )
+    output_stem = _safe_output_stem(detected_heading, hwpx_path.stem)
     txt_path = output_dir / f"{output_stem}.txt"
     epub_path = output_dir / f"{output_stem}.epub"
     existing = [path for path in (txt_path, epub_path) if path.exists()]
@@ -305,8 +314,6 @@ def main() -> int:
     policy = 'overwrite' if args.overwrite else args.existing_policy
 
     if args.batch_dir:
-        if args.template != 'serial':
-            raise ValueError("폴더 일괄 처리는 연재형에서만 사용할 수 있습니다.")
         batch_dir = Path(args.batch_dir).expanduser().resolve()
         if not batch_dir.is_dir():
             raise FileNotFoundError(f"원고 폴더를 찾을 수 없습니다: {batch_dir}")
@@ -321,7 +328,7 @@ def main() -> int:
         for index, hwpx_path in enumerate(manuscripts, 1):
             print(f"PROGRESS={index}/{len(manuscripts)}|{hwpx_path.name}", flush=True)
             try:
-                result = convert_one(hwpx_path, cover_path, output_dir, 'serial', copyright_values, policy)
+                result = convert_one(hwpx_path, cover_path, output_dir, args.template, copyright_values, policy)
                 if result is None:
                     skipped += 1
                 else:
