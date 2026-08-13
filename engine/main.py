@@ -85,7 +85,7 @@ def apply_copyright_form(text: str, values: dict[str, str], fallback_title: str)
         ('발행처', 'publisher'),
         ('발행일', 'date'),
         ('UCI', 'uci'),
-        ('투고메일', 'submission_email'),
+        ('투고문의', 'submission_email'),
         ('저작권 문구', 'rights'),
     ]
     fallbacks = {
@@ -94,7 +94,7 @@ def apply_copyright_form(text: str, values: dict[str, str], fallback_title: str)
         'publisher': existing.get('발행처', ''),
         'date': existing.get('발행일', ''),
         'uci': existing.get('UCI', ''),
-        'submission_email': existing.get('투고메일', ''),
+        'submission_email': existing.get('투고문의', existing.get('투고메일', '')),
         'rights': existing.get('저작권 문구', ''),
     }
     lines = ['판권']
@@ -138,7 +138,7 @@ def _copyright_content(metadata: dict[str, str]) -> str:
         ('발행처', metadata.get('publisher', '')),
         ('발행일', metadata.get('date', '')),
         ('UCI', metadata.get('identifier', '')),
-        ('투고메일', metadata.get('submission_email', '')),
+        ('투고문의', metadata.get('submission_email', '')),
         ('저작권 문구', metadata.get('rights', '')),
     ]
     return '\n\n'.join(f'{label}: {value}' for label, value in fields)

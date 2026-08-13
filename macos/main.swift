@@ -121,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             [NSTextField(labelWithString: "발행처"), publisherField],
             [NSTextField(labelWithString: "발행일"), dateField],
             [NSTextField(labelWithString: "UCI"), uciField],
-            [NSTextField(labelWithString: "투고메일"), submissionEmailField],
+            [NSTextField(labelWithString: "투고문의"), submissionEmailField],
             [NSTextField(labelWithString: "저작권 문구"), rightsField],
         ])
         copyrightForm.rowSpacing = 8
