@@ -285,6 +285,7 @@ def build_serial_epub(
     txt_path: Path,
     cover_path: Optional[Path],
     epub_path: Path,
+    include_cover_page: bool = True,
     include_copyright: bool = True,
 ) -> None:
     """Create a lightweight serial EPUB: cover -> one episode -> copyright."""
@@ -318,7 +319,7 @@ def build_serial_epub(
         copyright_page = create_chapter('판권', _copyright_content(metadata), 'copyright.xhtml', language='ko')
         book.add_item(copyright_page)
     book.toc = []
-    if cover_page:
+    if cover_page and include_cover_page:
         book.toc.append(epub.Link(cover_page.file_name, '표지', 'cover-link'))
     book.toc.append(epub.Link(episode_page.file_name, index_title, 'episode-link'))
     if copyright_page:
@@ -326,7 +327,7 @@ def build_serial_epub(
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
     add_css_style(book)
-    book.spine = ([cover_page] if cover_page else []) + [episode_page] + ([copyright_page] if copyright_page else [])
+    book.spine = ([cover_page] if cover_page and include_cover_page else []) + [episode_page] + ([copyright_page] if copyright_page else [])
     _write_epub_file(str(epub_path), book)
 
 
@@ -367,15 +368,15 @@ def convert_one(
         output.write(source_text)
     optimized_cover = output_dir / f'.{output_stem}.optimized-cover.jpg'
     episode_number = detect_episode_number(source_text) if template == 'serial' else None
-    omit_ridi_extras = platform == 'ridi' and template == 'serial' and episode_number is not None and episode_number >= 2
-    if not omit_ridi_extras:
-        optimize_cover(cover_path, optimized_cover, platform)
+    omit_ridi_body_extras = platform == 'ridi' and template == 'serial' and episode_number is not None and episode_number >= 2
+    optimize_cover(cover_path, optimized_cover, platform)
     if template == 'serial':
         build_serial_epub(
             txt_path,
-            None if omit_ridi_extras else optimized_cover,
+            optimized_cover,
             epub_path,
-            include_copyright=not omit_ridi_extras,
+            include_cover_page=not omit_ridi_body_extras,
+            include_copyright=not omit_ridi_body_extras,
         )
     else:
         build_book_epub(txt_path, optimized_cover, epub_path)

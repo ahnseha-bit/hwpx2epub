@@ -243,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let isSerial = templatePopup.indexOfSelectedItem == 1
         let isRidi = platformPopup.indexOfSelectedItem == 1
         if isSerial && isRidi {
-            statusLabel.stringValue = "리디북스 연재형: 2화부터 표지와 판권을 자동으로 제외합니다."
+            statusLabel.stringValue = "리디북스 연재형: 2화부터 대표 표지는 유지하고, 본문 표지 페이지와 판권만 제외합니다."
         } else if isSerial {
             statusLabel.stringValue = "카카오페이지 연재형: 모든 회차에 표지와 판권을 포함합니다."
         } else {
