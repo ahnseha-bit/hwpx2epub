@@ -419,7 +419,7 @@ def create_chapter(title: str, content: str, file_name: str, illustration_href: 
         <body class="chinese-text">
             {chapter_heading_html}
             {illustration_head}
-            <div style="margin-top: 1.5rem;">
+            <div style="margin-top: 1.5em;">
                 {rendered_content}
             </div>
             {illustration_tail}
@@ -444,6 +444,7 @@ def create_chapter(title: str, content: str, file_name: str, illustration_href: 
         </html>
         '''
     
+    chapter.add_link(href="style/nav.css", rel="stylesheet", type="text/css")
     return chapter
 
 
@@ -464,11 +465,12 @@ def create_serial_episode(title: str, subtitle: str, content: str,
         <title>{safe_title}</title>
     </head>
     <body class="chinese-text">
-        <div style="font-size: 1.7em; font-weight: 700; margin: 0 0 1.1em 0;">{safe_title}</div>
-        <div style="font-size: 1.25em; font-weight: 600; margin: 0 0 2em 0;">{safe_subtitle}</div>
-        <div style="margin-top: 1.5rem;">
+        <div style="font-size: 1.7em; font-weight: 700; margin: 0em 0em 1.1em 0em;">{safe_title}</div>
+        <div style="font-size: 1.25em; font-weight: 600; margin: 0em 0em 2em 0em;">{safe_subtitle}</div>
+        <div style="margin-top: 1.5em;">
             {rendered_content}
         </div>
     </body>
     </html>'''
+    page.add_link(href="style/nav.css", rel="stylesheet", type="text/css")
     return page

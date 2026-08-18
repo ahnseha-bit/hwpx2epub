@@ -8,10 +8,12 @@ import sys
 import unicodedata
 import zipfile
 import xml.etree.ElementTree as ET
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
 from ebooklib import epub
+from PIL import Image
 from txt_to_epub.core import (
     _create_epub_book,
     _extract_copyright_metadata,
@@ -193,7 +195,93 @@ def detect_first_heading(text: str, fallback_title: str) -> str:
     return fallback_title
 
 
-def build_serial_epub(txt_path: Path, cover_path: Path, epub_path: Path) -> None:
+def detect_episode_number(text: str) -> Optional[int]:
+    """Read an episode number such as 1화, 01화, 001화 or 제1화 from the first line."""
+    heading = detect_first_heading(text, '')
+    match = re.search(r'(?:제\s*)?0*(\d{1,4})\s*화(?:\s|$)', heading)
+    return int(match.group(1)) if match else None
+
+
+def optimize_cover(source: Path, destination: Path, platform: str) -> None:
+    """Create a compact sRGB JPEG cover suitable for the selected storefront."""
+    target_width = 1080 if platform == 'kakao' else 1120
+    max_bytes = 500 * 1024 if platform == 'kakao' else 450 * 1024
+    with Image.open(source) as opened:
+        image = opened.convert('RGBA')
+        background = Image.new('RGB', image.size, 'white')
+        background.paste(image, mask=image.getchannel('A'))
+        height = max(1, round(background.height * target_width / background.width))
+        background = background.resize((target_width, height), Image.Resampling.LANCZOS)
+        for quality in range(90, 39, -5):
+            buffer = BytesIO()
+            background.save(buffer, format='JPEG', quality=quality, optimize=True, progressive=False, dpi=(72, 72))
+            if buffer.tell() <= max_bytes or quality == 40:
+                destination.write_bytes(buffer.getvalue())
+                return
+
+
+def _rewrite_epub_for_distribution(epub_path: Path, platform: str) -> None:
+    """Convert EbookLib's package to a conservative EPUB 2 layout and storefront names."""
+    replacement_names = {}
+    if platform == 'ridi':
+        replacement_names = {
+            'EPUB/cover.xhtml': 'EPUB/cover.html',
+            'EPUB/copyright.xhtml': 'EPUB/copyright.html',
+        }
+
+    with zipfile.ZipFile(epub_path, 'r') as source:
+        entries = [(item, source.read(item.filename)) for item in source.infolist()]
+
+    temporary = epub_path.with_suffix('.rewrite.tmp')
+    with zipfile.ZipFile(temporary, 'w') as target:
+        target.writestr('mimetype', b'application/epub+zip', compress_type=zipfile.ZIP_STORED)
+        for item, data in entries:
+            name = item.filename
+            if name == 'mimetype' or name == 'EPUB/nav.xhtml':
+                continue
+            new_name = replacement_names.get(name, name)
+            if name.endswith(('.opf', '.ncx', '.xhtml', '.html')):
+                text = data.decode('utf-8')
+                for old, new in replacement_names.items():
+                    text = text.replace(Path(old).name, Path(new).name)
+                if name.endswith('.opf'):
+                    text = re.sub(r' version="3\.0"', ' version="2.0"', text, count=1)
+                    text = re.sub(r' prefix="[^"]*"', '', text, count=1)
+                    text = re.sub(r'\s*<meta property="dcterms:modified">.*?</meta>', '', text)
+                    text = re.sub(r'\s*<item[^>]+(?:id="nav"|properties="nav")[^>]*/>', '', text)
+                    text = re.sub(r' properties="[^"]*"', '', text)
+                else:
+                    text = text.replace('<!DOCTYPE html>', '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">')
+                    text = re.sub(r' xmlns:epub="[^"]*"', '', text)
+                    text = re.sub(r' epub:prefix="[^"]*"', '', text)
+                    text = re.sub(r' epub:type="[^"]*"', '', text)
+                    text = re.sub(r' role="[^"]*"', '', text)
+                    text = re.sub(r' aria-label="[^"]*"', '', text)
+                    text = re.sub(r'<nav([^>]*)>', r'<div\1>', text)
+                    text = text.replace('</nav>', '</div>')
+                data = text.encode('utf-8')
+            target.writestr(new_name, data, compress_type=zipfile.ZIP_DEFLATED)
+    temporary.replace(epub_path)
+
+
+def validate_distribution_epub(epub_path: Path, platform: str) -> None:
+    """Raise a clear error when a generated EPUB exceeds storefront hard limits."""
+    if platform == 'ridi' and epub_path.stat().st_size > 1024 * 1024:
+        raise ValueError(f'리디북스 EPUB 전체 용량이 1MB를 초과합니다: {epub_path.stat().st_size / 1024:.0f}KB')
+    with zipfile.ZipFile(epub_path) as archive:
+        for item in archive.infolist():
+            if platform == 'kakao' and item.filename.endswith(('.xhtml', '.html')) and item.file_size > 300 * 1024:
+                raise ValueError(f'카카오페이지 챕터 용량이 300KB를 초과합니다: {item.filename}')
+            if platform == 'kakao' and item.filename.lower().endswith(('.jpg', '.jpeg', '.png')) and item.file_size > 500 * 1024:
+                raise ValueError(f'카카오페이지 이미지 용량이 500KB를 초과합니다: {item.filename}')
+
+
+def build_serial_epub(
+    txt_path: Path,
+    cover_path: Optional[Path],
+    epub_path: Path,
+    include_copyright: bool = True,
+) -> None:
     """Create a lightweight serial EPUB: cover -> one episode -> copyright."""
     source = unicodedata.normalize('NFC', txt_path.read_text(encoding='utf-8-sig'))
     metadata = _extract_copyright_metadata(source)
@@ -213,24 +301,27 @@ def build_serial_epub(txt_path: Path, cover_path: Path, epub_path: Path) -> None
     book = _create_epub_book(
         title=title,
         author=author,
-        cover_image=str(cover_path),
+        cover_image=str(cover_path) if cover_path else None,
         language='ko',
         metadata=extra_metadata,
     )
-    cover_page = book.get_item_with_id('cover')
+    cover_page = book.get_item_with_id('cover') if cover_path else None
     episode_page = create_serial_episode(index_title, subtitle, episode_body, 'episode.xhtml', language='ko')
-    copyright_page = create_chapter('판권', _copyright_content(metadata), 'copyright.xhtml', language='ko')
     book.add_item(episode_page)
-    book.add_item(copyright_page)
-    book.toc = [
-        epub.Link(cover_page.file_name, '표지', 'cover-link'),
-        epub.Link(episode_page.file_name, index_title, 'episode-link'),
-        epub.Link(copyright_page.file_name, '판권', 'copyright-link'),
-    ]
+    copyright_page = None
+    if include_copyright:
+        copyright_page = create_chapter('판권', _copyright_content(metadata), 'copyright.xhtml', language='ko')
+        book.add_item(copyright_page)
+    book.toc = []
+    if cover_page:
+        book.toc.append(epub.Link(cover_page.file_name, '표지', 'cover-link'))
+    book.toc.append(epub.Link(episode_page.file_name, index_title, 'episode-link'))
+    if copyright_page:
+        book.toc.append(epub.Link(copyright_page.file_name, '판권', 'copyright-link'))
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
     add_css_style(book)
-    book.spine = [cover_page, episode_page, copyright_page]
+    book.spine = ([cover_page] if cover_page else []) + [episode_page] + ([copyright_page] if copyright_page else [])
     _write_epub_file(str(epub_path), book)
 
 
@@ -241,6 +332,7 @@ def convert_one(
     template: str,
     copyright_values: dict[str, str],
     existing_policy: str,
+    platform: str,
 ) -> Optional[tuple[Path, Path]]:
     """Convert one manuscript, or return None when an existing result is skipped."""
     temporary_txt_path = output_dir / f".{hwpx_path.stem}.hwpx-epub-maker.tmp.txt"
@@ -268,10 +360,23 @@ def convert_one(
     source_text = apply_copyright_form(source_text, copyright_values, hwpx_path.stem)
     with txt_path.open('w', encoding='utf-8', newline='\n') as output:
         output.write(source_text)
+    optimized_cover = output_dir / f'.{output_stem}.optimized-cover.jpg'
+    episode_number = detect_episode_number(source_text) if template == 'serial' else None
+    omit_ridi_extras = platform == 'ridi' and template == 'serial' and episode_number is not None and episode_number >= 2
+    if not omit_ridi_extras:
+        optimize_cover(cover_path, optimized_cover, platform)
     if template == 'serial':
-        build_serial_epub(txt_path, cover_path, epub_path)
+        build_serial_epub(
+            txt_path,
+            None if omit_ridi_extras else optimized_cover,
+            epub_path,
+            include_copyright=not omit_ridi_extras,
+        )
     else:
-        build_book_epub(txt_path, cover_path, epub_path)
+        build_book_epub(txt_path, optimized_cover, epub_path)
+    optimized_cover.unlink(missing_ok=True)
+    _rewrite_epub_for_distribution(epub_path, platform)
+    validate_distribution_epub(epub_path, platform)
     print(f"TXT={txt_path}", flush=True)
     print(f"EPUB={epub_path}", flush=True)
     return txt_path, epub_path
@@ -292,6 +397,7 @@ def main() -> int:
     parser.add_argument("--submission-email", default="")
     parser.add_argument("--rights", default="")
     parser.add_argument("--template", choices=('book', 'serial'), default='book')
+    parser.add_argument("--platform", choices=('kakao', 'ridi'), default='kakao')
     parser.add_argument("--overwrite", action='store_true')
     parser.add_argument("--existing-policy", choices=('error', 'overwrite', 'skip'), default='error')
     args = parser.parse_args()
@@ -330,7 +436,7 @@ def main() -> int:
         for index, hwpx_path in enumerate(manuscripts, 1):
             print(f"PROGRESS={index}/{len(manuscripts)}|{hwpx_path.name}", flush=True)
             try:
-                result = convert_one(hwpx_path, cover_path, output_dir, args.template, copyright_values, policy)
+                result = convert_one(hwpx_path, cover_path, output_dir, args.template, copyright_values, policy, args.platform)
                 if result is None:
                     skipped += 1
                 else:
@@ -347,7 +453,7 @@ def main() -> int:
     if not hwpx_path.is_file():
         raise FileNotFoundError(f"HWPX 파일을 찾을 수 없습니다: {hwpx_path}")
     print("HWPX에서 TXT를 추출하고 있습니다…", flush=True)
-    convert_one(hwpx_path, cover_path, output_dir, args.template, copyright_values, policy)
+    convert_one(hwpx_path, cover_path, output_dir, args.template, copyright_values, policy, args.platform)
     return 0
 
 

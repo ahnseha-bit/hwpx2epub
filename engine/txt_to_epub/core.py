@@ -1364,6 +1364,11 @@ def txt_to_epub(txt_file: str, epub_file: str, title: Optional[str] = None,
                                 # Add chapter and its sections as nested structure
                                 volume_chapters.append((chapter_link, section_links))
                             else:  # Chapter has no sections, add chapter content directly
+                                chapter_file_name = (
+                                    "copyright.xhtml"
+                                    if (chapter.title or '').strip() == '판권'
+                                    else f"chap_{chapter_counter}.xhtml"
+                                )
                                 chapter_page = create_chapter(
                                     chapter.title,
                                     (
@@ -1372,7 +1377,7 @@ def txt_to_epub(txt_file: str, epub_file: str, title: Optional[str] = None,
                                         and metadata_payload.get('copyright_content')
                                         else chapter.content
                                     ),
-                                    f"chap_{chapter_counter}.xhtml",
+                                    chapter_file_name,
                                     illustration_href=chapter_illustration_href,
                                     illustration_caption=None,
                                     illustration_position=config.ai_illustration_position,
@@ -1381,7 +1386,7 @@ def txt_to_epub(txt_file: str, epub_file: str, title: Optional[str] = None,
                                 book.add_item(chapter_page)
                                 chapter_items.append(chapter_page)
                                 # Chapter directly as volume sub-item (indented one level relative to volume)
-                                volume_chapters.append(epub.Link(f"chap_{chapter_counter}.xhtml", chapter.title, f"chap_{chapter_counter}"))
+                                volume_chapters.append(epub.Link(chapter_file_name, chapter.title, f"chap_{chapter_counter}"))
 
                             chapter_counter += 1
                             chapter_pbar.update(1)
@@ -1506,6 +1511,11 @@ def txt_to_epub(txt_file: str, epub_file: str, title: Optional[str] = None,
                                 # Add chapter and its sections as nested structure
                                 toc_structure.append((chapter_link, section_links))
                             else:  # Chapter has no sections, add chapter content directly
+                                chapter_file_name = (
+                                    "copyright.xhtml"
+                                    if (chapter.title or '').strip() == '판권'
+                                    else f"chap_{chapter_counter}.xhtml"
+                                )
                                 chapter_page = create_chapter(
                                     chapter.title,
                                     (
@@ -1514,7 +1524,7 @@ def txt_to_epub(txt_file: str, epub_file: str, title: Optional[str] = None,
                                         and metadata_payload.get('copyright_content')
                                         else chapter.content
                                     ),
-                                    f"chap_{chapter_counter}.xhtml",
+                                    chapter_file_name,
                                     illustration_href=chapter_illustration_href,
                                     illustration_caption=None,
                                     illustration_position=config.ai_illustration_position,
@@ -1523,7 +1533,7 @@ def txt_to_epub(txt_file: str, epub_file: str, title: Optional[str] = None,
                                 book.add_item(chapter_page)
                                 chapter_items.append(chapter_page)
                                 # Chapter as top-level item
-                                toc_structure.append(epub.Link(f"chap_{chapter_counter}.xhtml", chapter.title, f"chap_{chapter_counter}"))
+                                toc_structure.append(epub.Link(chapter_file_name, chapter.title, f"chap_{chapter_counter}"))
 
                             chapter_counter += 1
                             chapter_pbar.update(1)

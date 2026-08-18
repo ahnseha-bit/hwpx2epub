@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let outputLabel = NSTextField(labelWithString: "HWPX 파일과 같은 폴더")
     private let inputModePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let templatePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let platformPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let duplicatePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let sourceButton = NSButton(title: "HWPX 선택", target: nil, action: nil)
     private let statusLabel = NSTextField(labelWithString: "HWPX와 표지를 선택해 주세요.")
@@ -67,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildWindow() {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 660, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: 660, height: 780),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -91,6 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         templatePopup.addItems(withTitles: ["단행본형", "연재형"])
         templatePopup.target = self
         templatePopup.action = #selector(templateChanged)
+        platformPopup.addItems(withTitles: ["카카오페이지", "리디북스"])
+        platformPopup.target = self
+        platformPopup.action = #selector(templateChanged)
         duplicatePopup.addItems(withTitles: ["기존 파일 모두 대치", "기존 파일 건너뛰기"])
 
         [hwpxLabel, coverLabel, outputLabel].forEach {
@@ -104,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             [coverButton, coverLabel],
             [outputButton, outputLabel],
             [NSTextField(labelWithString: "출력 형식"), templatePopup],
+            [NSTextField(labelWithString: "유통 플랫폼"), platformPopup],
             [NSTextField(labelWithString: "중복 처리"), duplicatePopup],
         ])
         form.rowSpacing = 14
@@ -236,9 +241,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func templateChanged() {
         let isSerial = templatePopup.indexOfSelectedItem == 1
-        statusLabel.stringValue = isSerial
-            ? "연재형: 첫 줄은 작품명+화수, 두 번째 비어 있지 않은 줄은 부제목으로 자동 인식합니다."
-            : "단행본형: 목차와 여러 장을 자동 인식합니다."
+        let isRidi = platformPopup.indexOfSelectedItem == 1
+        if isSerial && isRidi {
+            statusLabel.stringValue = "리디북스 연재형: 2화부터 표지와 판권을 자동으로 제외합니다."
+        } else if isSerial {
+            statusLabel.stringValue = "카카오페이지 연재형: 모든 회차에 표지와 판권을 포함합니다."
+        } else {
+            statusLabel.stringValue = "단행본형: 표지·목차·본문·판권을 포함합니다."
+        }
     }
 
     @objc private func convert() {
@@ -271,6 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "--submission-email", submissionEmailField.stringValue,
             "--rights", rightsField.stringValue,
             "--template", templatePopup.indexOfSelectedItem == 1 ? "serial" : "book",
+            "--platform", platformPopup.indexOfSelectedItem == 1 ? "ridi" : "kakao",
         ] + (overwrite ? ["--overwrite"] : [])
         let sourceArguments = isBatch ? ["--batch-dir", hwpx.path] : ["--hwpx", hwpx.path]
         let batchArguments = isBatch ? [
