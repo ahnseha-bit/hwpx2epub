@@ -206,9 +206,11 @@ EPUB 변환 기능은 `oomol-lab/txt-to-epub-converter`의 수정본을 포함�
 
 검증 후 GitHub `main`에 푸시하여 다른 Mac에서도 코드와 기록이 함께 보이도록 합니다.
 
+EPUB 2 후처리 시 XHTML/HTML의 `<nav>` 요소만 변환해야 합니다. `toc.ncx`에는 같은 정규식 처리를 적용하지 마세요. NCX의 `navMap`, `navPoint`, `navLabel`이 손상되면 EPUB이 열리지 않습니다. 생성 후 `container.xml`, OPF, NCX, 모든 XHTML/HTML을 XML 파서로 검사합니다.
+
 ## 현재 기준 상태
 
-- 앱 버전: `1.6.0`
+- 앱 버전: `1.6.1`
 - GitHub 저장소: `https://github.com/ahnseha-bit/hwpx2epub`
 - 기본 브랜치: `main`
-- 마지막 핵심 수정: 카카오페이지·리디북스 유통 프리셋과 플랫폼별 표지·판권 처리 추가
+- 마지막 핵심 수정: EPUB 2 NCX 목차 손상 오류 수정 및 생성 후 XML 자동 검사 추가

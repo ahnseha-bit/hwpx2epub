@@ -250,7 +250,7 @@ def _rewrite_epub_for_distribution(epub_path: Path, platform: str) -> None:
                     text = re.sub(r'\s*<meta property="dcterms:modified">.*?</meta>', '', text)
                     text = re.sub(r'\s*<item[^>]+(?:id="nav"|properties="nav")[^>]*/>', '', text)
                     text = re.sub(r' properties="[^"]*"', '', text)
-                else:
+                elif name.endswith(('.xhtml', '.html')):
                     text = text.replace('<!DOCTYPE html>', '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">')
                     text = re.sub(r' xmlns:epub="[^"]*"', '', text)
                     text = re.sub(r' epub:prefix="[^"]*"', '', text)
@@ -270,6 +270,11 @@ def validate_distribution_epub(epub_path: Path, platform: str) -> None:
         raise ValueError(f'리디북스 EPUB 전체 용량이 1MB를 초과합니다: {epub_path.stat().st_size / 1024:.0f}KB')
     with zipfile.ZipFile(epub_path) as archive:
         for item in archive.infolist():
+            if item.filename.endswith(('.xml', '.opf', '.ncx', '.xhtml', '.html')):
+                try:
+                    ET.fromstring(archive.read(item.filename))
+                except ET.ParseError as error:
+                    raise ValueError(f'EPUB XML 형식 오류: {item.filename}: {error}') from error
             if platform == 'kakao' and item.filename.endswith(('.xhtml', '.html')) and item.file_size > 300 * 1024:
                 raise ValueError(f'카카오페이지 챕터 용량이 300KB를 초과합니다: {item.filename}')
             if platform == 'kakao' and item.filename.lower().endswith(('.jpg', '.jpeg', '.png')) and item.file_size > 500 * 1024:
