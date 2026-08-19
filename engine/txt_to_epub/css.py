@@ -22,6 +22,11 @@ def add_css_style(book: epub.EpubBook) -> None:
         text-align: justify;
     }
 
+    p.scene-break {
+        text-align: center;
+        text-indent: 0em;
+    }
+
     .chapter-title {
         margin: 2em 0em;
         padding: 0em;

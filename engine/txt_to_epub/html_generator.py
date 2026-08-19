@@ -79,8 +79,20 @@ def _render_text_blocks(content: str) -> str:
         lines = [line.strip() for line in block.split("\n") if line.strip()]
         if not lines:
             continue
-        escaped_lines = [_escape_text(line) for line in lines]
-        paragraphs.append(f"<p>{'<br/>'.join(escaped_lines)}</p>")
+        regular_lines = []
+
+        def flush_regular_lines() -> None:
+            if regular_lines:
+                paragraphs.append(f"<p>{'<br/>'.join(regular_lines)}</p>")
+                regular_lines.clear()
+
+        for line in lines:
+            if re.fullmatch(r"\*\s+\*\s+\*", line):
+                flush_regular_lines()
+                paragraphs.append('<p class="scene-break">* * *</p>')
+            else:
+                regular_lines.append(_escape_text(line))
+        flush_regular_lines()
     return "\n".join(paragraphs)
 
 
