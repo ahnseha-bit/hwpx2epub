@@ -243,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let isSerial = templatePopup.indexOfSelectedItem == 1
         let isRidi = platformPopup.indexOfSelectedItem == 1
         if isSerial && isRidi {
-            statusLabel.stringValue = "리디북스 연재형: 2화부터 대표 표지는 유지하고, 본문 표지 페이지와 판권만 제외합니다."
+            statusLabel.stringValue = "리디북스 연재형: 2화부터 EPUB 내부 표지와 판권을 모두 제외합니다."
         } else if isSerial {
             statusLabel.stringValue = "카카오페이지 연재형: 모든 회차에 표지와 판권을 포함합니다."
         } else {
@@ -309,6 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.convertButton.isEnabled = true
                     if process.terminationStatus == 0 {
                         var summary: (Int, Int, Int)?
+                        var warnings: [String] = []
                         for line in stdout.split(separator: "\n") {
                             if line.hasPrefix("TXT=") {
                                 self.txtURL = URL(fileURLWithPath: String(line.dropFirst(4)))
@@ -317,6 +318,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             } else if line.hasPrefix("SUMMARY=") {
                                 let values = line.dropFirst(8).split(separator: "|").compactMap { Int($0) }
                                 if values.count == 3 { summary = (values[0], values[1], values[2]) }
+                            } else if line.hasPrefix("WARNING=") {
+                                warnings.append(String(line.dropFirst(8)))
                             }
                         }
                         if let result = summary {
@@ -329,6 +332,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 ? "완료되었습니다. 기존 TXT와 EPUB을 대치했습니다."
                                 : "완료되었습니다. TXT와 EPUB을 저장했습니다."
                             self.setResultButtons(enabled: true)
+                        }
+                        if !warnings.isEmpty {
+                            self.showAlert("변환은 완료되었지만 확인할 권장 사항이 있습니다.\n\n" + warnings.joined(separator: "\n"))
                         }
                     } else {
                         let message = stderr.isEmpty ? stdout : stderr

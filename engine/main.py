@@ -9,7 +9,7 @@ import unicodedata
 import zipfile
 import xml.etree.ElementTree as ET
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from ebooklib import epub
@@ -265,20 +265,85 @@ def _rewrite_epub_for_distribution(epub_path: Path, platform: str) -> None:
 
 
 def validate_distribution_epub(epub_path: Path, platform: str) -> None:
-    """Raise a clear error when a generated EPUB exceeds storefront hard limits."""
+    """Validate package structure and storefront size/image recommendations."""
     if platform == 'ridi' and epub_path.stat().st_size > 1024 * 1024:
         raise ValueError(f'리디북스 EPUB 전체 용량이 1MB를 초과합니다: {epub_path.stat().st_size / 1024:.0f}KB')
     with zipfile.ZipFile(epub_path) as archive:
+        items = archive.infolist()
+        names = archive.namelist()
+        if not items or items[0].filename != 'mimetype':
+            raise ValueError('EPUB 형식 오류: mimetype 파일이 첫 번째 항목이 아닙니다.')
+        mimetype = archive.read('mimetype') if 'mimetype' in names else b''
+        if mimetype != b'application/epub+zip' or archive.getinfo('mimetype').compress_type != zipfile.ZIP_STORED:
+            raise ValueError('EPUB 형식 오류: mimetype 파일의 내용 또는 압축 방식이 올바르지 않습니다.')
+        if len(names) != len(set(names)):
+            raise ValueError('EPUB 형식 오류: ZIP 패키지에 중복 파일명이 있습니다.')
+
+        container_name = 'META-INF/container.xml'
+        if container_name not in names:
+            raise ValueError('EPUB 형식 오류: META-INF/container.xml이 없습니다.')
+        container = ET.fromstring(archive.read(container_name))
+        rootfile = next((node for node in container.iter() if node.tag.endswith('}rootfile')), None)
+        opf_name = rootfile.get('full-path', '') if rootfile is not None else ''
+        if not opf_name or opf_name not in names:
+            raise ValueError('EPUB 형식 오류: container.xml이 가리키는 OPF 파일이 없습니다.')
+
+        opf = ET.fromstring(archive.read(opf_name))
+        if opf.get('version') != '2.0':
+            raise ValueError(f'리디·카카오 호환 EPUB 2.0이 아닙니다: OPF version={opf.get("version", "없음")}')
+        opf_ns = {'opf': 'http://www.idpf.org/2007/opf', 'dc': 'http://purl.org/dc/elements/1.1/'}
+        manifest = {
+            node.get('id', ''): node.get('href', '')
+            for node in opf.findall('.//opf:manifest/opf:item', opf_ns)
+        }
+        opf_dir = PurePosixPath(opf_name).parent
+        for href in manifest.values():
+            target = str(opf_dir / href.split('#', 1)[0])
+            if href and target not in names:
+                raise ValueError(f'EPUB 형식 오류: OPF manifest 파일이 없습니다: {target}')
+        spine_refs = [node.get('idref', '') for node in opf.findall('.//opf:spine/opf:itemref', opf_ns)]
+        missing_refs = [ref for ref in spine_refs if ref not in manifest]
+        if missing_refs:
+            raise ValueError('EPUB 형식 오류: spine이 없는 manifest ID를 참조합니다: ' + ', '.join(missing_refs))
+        if platform == 'ridi' and len(spine_refs) > 250:
+            print(f'WARNING=리디북스 권장 spine HTML 개수 250개를 초과합니다: {len(spine_refs)}개', flush=True)
+        for field in ('title', 'identifier', 'language'):
+            if opf.find(f'.//dc:{field}', opf_ns) is None:
+                raise ValueError(f'EPUB 형식 오류: 필수 메타데이터 dc:{field}가 없습니다.')
+
         for item in archive.infolist():
             if item.filename.endswith(('.xml', '.opf', '.ncx', '.xhtml', '.html')):
                 try:
                     ET.fromstring(archive.read(item.filename))
                 except ET.ParseError as error:
                     raise ValueError(f'EPUB XML 형식 오류: {item.filename}: {error}') from error
-            if platform == 'kakao' and item.filename.endswith(('.xhtml', '.html')) and item.file_size > 300 * 1024:
-                raise ValueError(f'카카오페이지 챕터 용량이 300KB를 초과합니다: {item.filename}')
+            if item.filename.endswith(('.xhtml', '.html')):
+                if item.file_size > 300 * 1024:
+                    raise ValueError(f'{platform} HTML 최대 용량 300KB를 초과합니다: {item.filename}')
+                if platform == 'ridi' and item.file_size > 150 * 1024:
+                    print(f'WARNING=리디북스 권장 HTML 용량 150KB를 초과합니다: {item.filename}', flush=True)
             if platform == 'kakao' and item.filename.lower().endswith(('.jpg', '.jpeg', '.png')) and item.file_size > 500 * 1024:
                 raise ValueError(f'카카오페이지 이미지 용량이 500KB를 초과합니다: {item.filename}')
+            if item.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                if not re.fullmatch(r'[A-Za-z0-9._-]+', PurePosixPath(item.filename).name):
+                    raise ValueError(f'EPUB 이미지 파일명은 영문·숫자를 사용해야 합니다: {item.filename}')
+                with Image.open(BytesIO(archive.read(item.filename))) as image:
+                    if image.mode not in {'RGB', 'RGBA'}:
+                        raise ValueError(f'EPUB 이미지는 RGB 계열이어야 합니다: {item.filename} ({image.mode})')
+                    if platform == 'ridi' and image.width < 1080:
+                        print(f'WARNING=리디북스 권장 이미지 폭 1080px보다 작습니다: {item.filename} ({image.width}px)', flush=True)
+                    if 'cover' in PurePosixPath(item.filename).stem.lower():
+                        ratio = image.height / image.width
+                        if abs(ratio - 1.45) > 0.08:
+                            print(f'WARNING=표지 비율이 리디 권장 1:1.45와 다릅니다: 1:{ratio:.2f}', flush=True)
+
+        for ncx_name in (name for name in names if name.endswith('.ncx')):
+            ncx = ET.fromstring(archive.read(ncx_name))
+            ncx_dir = PurePosixPath(ncx_name).parent
+            for content in (node for node in ncx.iter() if node.tag.endswith('}content')):
+                src = content.get('src', '').split('#', 1)[0]
+                if src and str(ncx_dir / src) not in names:
+                    raise ValueError(f'EPUB NCX 목차가 없는 파일을 참조합니다: {src}')
 
 
 def build_serial_epub(
@@ -368,15 +433,16 @@ def convert_one(
         output.write(source_text)
     optimized_cover = output_dir / f'.{output_stem}.optimized-cover.jpg'
     episode_number = detect_episode_number(source_text) if template == 'serial' else None
-    omit_ridi_body_extras = platform == 'ridi' and template == 'serial' and episode_number is not None and episode_number >= 2
-    optimize_cover(cover_path, optimized_cover, platform)
+    omit_ridi_extras = platform == 'ridi' and template == 'serial' and episode_number is not None and episode_number >= 2
+    if not omit_ridi_extras:
+        optimize_cover(cover_path, optimized_cover, platform)
     if template == 'serial':
         build_serial_epub(
             txt_path,
-            optimized_cover,
+            None if omit_ridi_extras else optimized_cover,
             epub_path,
-            include_cover_page=not omit_ridi_body_extras,
-            include_copyright=not omit_ridi_body_extras,
+            include_cover_page=not omit_ridi_extras,
+            include_copyright=not omit_ridi_extras,
         )
     else:
         build_book_epub(txt_path, optimized_cover, epub_path)

@@ -89,7 +89,7 @@ def _render_text_blocks(content: str) -> str:
         for line in lines:
             if re.fullmatch(r"\*\s+\*\s+\*", line):
                 flush_regular_lines()
-                paragraphs.append('<p class="scene-break">* * *</p>')
+                paragraphs.append('<p class="scene-break ridicenter">* * *</p>')
             else:
                 regular_lines.append(_escape_text(line))
         flush_regular_lines()
@@ -147,7 +147,7 @@ def _get_watermark_html(watermark_text: str) -> str:
 
     safe_watermark = _escape_text(watermark_text)
     return f'''
-        <div style="position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%); width: 100%;">
+        <div style="position: fixed; bottom: 2em; left: 50%; transform: translateX(-50%); width: 100%;">
             <p style="color: #95a5a6; font-size: 0.8em; text-align: center;">
                 {safe_watermark}
             </p>
@@ -169,20 +169,10 @@ def create_volume_page(volume_title: str, file_name: str, chapter_count: int,
     volume_page = epub.EpubHtml(title=volume_title, file_name=file_name, lang=language)
     safe_volume_title = _escape_text(volume_title)
 
-    # Determine decorative icon
-    if "卷" in volume_title:
-        icon = "📖"
-    elif "部" in volume_title:
-        icon = "📚"
-    elif "篇" in volume_title:
-        icon = "📜"
-    else:
-        icon = "📖"
-
     # Generate watermark HTML
     watermark_html = _get_watermark_html(watermark_text) if watermark_text else ""
 
-    # Create concise volume page content
+    # Keep structural pages deliberately plain for storefront compatibility.
     volume_page.content = f'''
     <!DOCTYPE html>
     <html lang="{language}">
@@ -191,32 +181,10 @@ def create_volume_page(volume_title: str, file_name: str, chapter_count: int,
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>{safe_volume_title}</title>
         <link rel="stylesheet" type="text/css" href="style/nav.css"/>
-        <style>
-            body {{
-                height: 100vh;
-                margin: 0;
-                padding: 2rem;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-                align-items: center;
-                page-break-after: always;
-                box-sizing: border-box;
-            }}
-            .volume-content {{
-                text-align: center;
-                max-width: 80%;
-            }}
-        </style>
     </head>
     <body class="chinese-text">
         <div class="volume-content">
-            <h1 class="volume-title">{safe_volume_title}</h1>
-            <div style="margin-top: 2rem;">
-                <div style="font-size: 3em; margin-bottom: 1.5rem;">{icon}</div>
-                <p style="color: #2c3e50; font-size: 1.3em; font-weight: 500; margin-bottom: 2rem;">
-                </p>
-            </div>
+            <h1 class="chapter-title">{safe_volume_title}</h1>
         </div>{watermark_html}
     </body>
     </html>
@@ -254,7 +222,8 @@ def create_chapter_page(chapter_title: str, chapter_content: str, file_name: str
         illustration_position=illustration_position
     )
 
-    # Create elegant chapter page content
+    # Chapters are already separate spine documents, so do not use page-break
+    # properties or fixed viewport layouts that RIDI warns against.
     if rendered_chapter_content:
         chapter_page.content = f'''
         <!DOCTYPE html>
@@ -264,38 +233,13 @@ def create_chapter_page(chapter_title: str, chapter_content: str, file_name: str
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{safe_chapter_title}</title>
             <link rel="stylesheet" type="text/css" href="style/nav.css"/>
-            <style>
-                body {{
-                    height: 100vh;
-                    margin: 0;
-                    padding: 2rem;
-                    display: flex;
-                    flex-direction: column;
-                    justify-content: center;
-                    page-break-after: always;
-                    box-sizing: border-box;
-                }}
-                .chapter-content {{
-                    text-align: center;
-                    max-width: 80%;
-                    margin: 0 auto;
-                }}
-            </style>
         </head>
         <body class="chinese-text">
-            <div class="chapter-content">
-                {chapter_heading_html}
-                {illustration_head}
-                <div style="margin-top: 1.5rem; margin-bottom: 2rem;">
-                    {rendered_chapter_content}
-                </div>
-                {illustration_tail}
-                <div style="margin-top: 2rem;">
-                    <div style="font-size: 3em; margin-bottom: 1.5rem;">📚</div>
-                    <p style="color: #2c3e50; font-size: 1.3em; font-weight: 500;">
-                    </p>
-                </div>
-            </div>{watermark_html}
+            {chapter_heading_html}
+            {illustration_head}
+            <div style="margin-top: 1.5em;">{rendered_chapter_content}</div>
+            {illustration_tail}
+            {watermark_html}
         </body>
         </html>
         '''
@@ -308,35 +252,12 @@ def create_chapter_page(chapter_title: str, chapter_content: str, file_name: str
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{safe_chapter_title}</title>
             <link rel="stylesheet" type="text/css" href="style/nav.css"/>
-            <style>
-                body {{
-                    height: 100vh;
-                    margin: 0;
-                    padding: 2rem;
-                    display: flex;
-                    flex-direction: column;
-                    justify-content: center;
-                    align-items: center;
-                    page-break-after: always;
-                    box-sizing: border-box;
-                }}
-                .chapter-content {{
-                    text-align: center;
-                    max-width: 80%;
-                }}
-            </style>
         </head>
         <body class="chinese-text">
-            <div class="chapter-content">
-                {chapter_heading_html}
-                {illustration_head}
-                {illustration_tail}
-                <div style="margin-top: 2rem;">
-                    <div style="font-size: 3em; margin-bottom: 1.5rem;">📚</div>
-                    <p style="color: #2c3e50; font-size: 1.3em; font-weight: 500;">
-                    </p>
-                </div>
-            </div>{watermark_html}
+            {chapter_heading_html}
+            {illustration_head}
+            {illustration_tail}
+            {watermark_html}
         </body>
         </html>
         '''
@@ -372,7 +293,7 @@ def create_section_page(section_title: str, section_content: str, file_name: str
         </head>
         <body class="chinese-text">
             <h2 class="section-title">{safe_section_title}</h2>
-            <div style="margin-top: 1rem;">
+            <div style="margin-top: 1em;">
                 {rendered_section_content}
             </div>
         </body>
@@ -390,7 +311,7 @@ def create_section_page(section_title: str, section_content: str, file_name: str
             <link rel="stylesheet" type="text/css" href="style/nav.css"/>
         </head>
         <body class="chinese-text">
-            <div style="margin-top: 1rem;">
+            <div style="margin-top: 1em;">
                 {rendered_section_content}
             </div>
         </body>
