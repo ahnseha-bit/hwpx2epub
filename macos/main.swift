@@ -245,7 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if isSerial && isRidi {
             statusLabel.stringValue = "리디북스 연재형: 2화부터 EPUB 내부 표지와 판권을 모두 제외합니다."
         } else if isSerial {
-            statusLabel.stringValue = "카카오페이지 연재형: 모든 회차에 표지와 판권을 포함합니다."
+            statusLabel.stringValue = "카카오페이지 연재형: 표지는 모든 회차에 유지하고, 판권은 1화에만 포함합니다."
         } else {
             statusLabel.stringValue = "단행본형: 표지·목차·본문·판권을 포함합니다."
         }

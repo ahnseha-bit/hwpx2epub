@@ -15,7 +15,7 @@ def add_css_style(book: epub.EpubBook) -> None:
     }
 
     p {
-        margin: 1em 0em;
+        margin: 0em;
         padding: 0em;
         font-size: 1em;
         line-height: 1.8em;
@@ -25,6 +25,29 @@ def add_css_style(book: epub.EpubBook) -> None:
     p.scene-break {
         text-align: center;
         text-indent: 0em;
+    }
+
+    body.cover-page {
+        margin: 0em;
+        padding: 0em;
+        text-align: center;
+        text-indent: 0em;
+    }
+
+    .cover {
+        width: 100%;
+        margin: 0em;
+        padding: 0em;
+        text-align: center;
+        text-indent: 0em;
+    }
+
+    .cover img {
+        width: 100%;
+        max-width: 100%;
+        height: auto;
+        margin: 0em;
+        padding: 0em;
     }
 
     .chapter-title {

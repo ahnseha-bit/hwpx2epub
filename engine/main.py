@@ -259,6 +259,19 @@ def _rewrite_epub_for_distribution(epub_path: Path, platform: str) -> None:
                     text = re.sub(r' aria-label="[^"]*"', '', text)
                     text = re.sub(r'<nav([^>]*)>', r'<div\1>', text)
                     text = text.replace('</nav>', '</div>')
+                    if Path(new_name).name in {'cover.xhtml', 'cover.html'}:
+                        if 'href="style/nav.css"' not in text:
+                            text = text.replace(
+                                '</head>',
+                                '<link href="style/nav.css" rel="stylesheet" type="text/css"/></head>',
+                                1,
+                            )
+                        text = re.sub(
+                            r'<body(?:\s[^>]*)?>\s*(<img\b[^>]*?/>)\s*</body>',
+                            r'<body class="cover-page"><div class="cover">\1</div></body>',
+                            text,
+                            count=1,
+                        )
                 data = text.encode('utf-8')
             target.writestr(new_name, data, compress_type=zipfile.ZIP_DEFLATED)
     temporary.replace(epub_path)
@@ -305,6 +318,9 @@ def validate_distribution_epub(epub_path: Path, platform: str) -> None:
         missing_refs = [ref for ref in spine_refs if ref not in manifest]
         if missing_refs:
             raise ValueError('EPUB 형식 오류: spine이 없는 manifest ID를 참조합니다: ' + ', '.join(missing_refs))
+        cover_documents = [href for href in manifest.values() if PurePosixPath(href).name in {'cover.xhtml', 'cover.html'}]
+        if cover_documents and (not spine_refs or manifest[spine_refs[0]] not in cover_documents):
+            raise ValueError('EPUB 형식 오류: 표지 XHTML이 spine의 첫 번째 항목이 아닙니다.')
         if platform == 'ridi' and len(spine_refs) > 250:
             print(f'WARNING=리디북스 권장 spine HTML 개수 250개를 초과합니다: {len(spine_refs)}개', flush=True)
         for field in ('title', 'identifier', 'language'):
@@ -314,9 +330,17 @@ def validate_distribution_epub(epub_path: Path, platform: str) -> None:
         for item in archive.infolist():
             if item.filename.endswith(('.xml', '.opf', '.ncx', '.xhtml', '.html')):
                 try:
-                    ET.fromstring(archive.read(item.filename))
+                    document_root = ET.fromstring(archive.read(item.filename))
                 except ET.ParseError as error:
                     raise ValueError(f'EPUB XML 형식 오류: {item.filename}: {error}') from error
+                if PurePosixPath(item.filename).name in {'cover.xhtml', 'cover.html'}:
+                    cover_div = next((node for node in document_root.iter() if node.tag.endswith('}div') and 'cover' in node.get('class', '').split()), None)
+                    cover_image = next((node for node in document_root.iter() if node.tag.endswith('}img')), None)
+                    cover_body = next((node for node in document_root.iter() if node.tag.endswith('}body')), None)
+                    if cover_div is None or cover_image is None or cover_image not in list(cover_div):
+                        raise ValueError('EPUB 표지 형식 오류: 표지는 <div class="cover"><img .../></div> 구조여야 합니다.')
+                    if cover_body is None or cover_body.get('class') != 'cover-page':
+                        raise ValueError('EPUB 표지 형식 오류: 표지 body 클래스가 올바르지 않습니다.')
             if item.filename.endswith(('.xhtml', '.html')):
                 if item.file_size > 300 * 1024:
                     raise ValueError(f'{platform} HTML 최대 용량 300KB를 초과합니다: {item.filename}')
@@ -332,10 +356,14 @@ def validate_distribution_epub(epub_path: Path, platform: str) -> None:
                         raise ValueError(f'EPUB 이미지는 RGB 계열이어야 합니다: {item.filename} ({image.mode})')
                     if platform == 'ridi' and image.width < 1080:
                         print(f'WARNING=리디북스 권장 이미지 폭 1080px보다 작습니다: {item.filename} ({image.width}px)', flush=True)
-                    if 'cover' in PurePosixPath(item.filename).stem.lower():
+                    if platform == 'ridi' and 'cover' in PurePosixPath(item.filename).stem.lower():
                         ratio = image.height / image.width
                         if abs(ratio - 1.45) > 0.08:
                             print(f'WARNING=표지 비율이 리디 권장 1:1.45와 다릅니다: 1:{ratio:.2f}', flush=True)
+            if item.filename.endswith('.css'):
+                css_text = archive.read(item.filename).decode('utf-8')
+                if re.search(r':[^;{}]*(?:px|pt|rem|vh|vw)\b', css_text, re.IGNORECASE):
+                    raise ValueError(f'EPUB CSS는 em 또는 % 상대 단위를 사용해야 합니다: {item.filename}')
 
         for ncx_name in (name for name in names if name.endswith('.ncx')):
             ncx = ET.fromstring(archive.read(ncx_name))
@@ -433,16 +461,18 @@ def convert_one(
         output.write(source_text)
     optimized_cover = output_dir / f'.{output_stem}.optimized-cover.jpg'
     episode_number = detect_episode_number(source_text) if template == 'serial' else None
-    omit_ridi_extras = platform == 'ridi' and template == 'serial' and episode_number is not None and episode_number >= 2
-    if not omit_ridi_extras:
+    later_serial_episode = template == 'serial' and episode_number is not None and episode_number >= 2
+    omit_cover = platform == 'ridi' and later_serial_episode
+    omit_copyright = platform in {'kakao', 'ridi'} and later_serial_episode
+    if not omit_cover:
         optimize_cover(cover_path, optimized_cover, platform)
     if template == 'serial':
         build_serial_epub(
             txt_path,
-            None if omit_ridi_extras else optimized_cover,
+            None if omit_cover else optimized_cover,
             epub_path,
-            include_cover_page=not omit_ridi_extras,
-            include_copyright=not omit_ridi_extras,
+            include_cover_page=not omit_cover,
+            include_copyright=not omit_copyright,
         )
     else:
         build_book_epub(txt_path, optimized_cover, epub_path)
