@@ -1,5 +1,18 @@
 import AppKit
+import Darwin
 import Foundation
+
+private struct CopyrightPreset: Codable {
+    var title: String
+    var author: String
+    var publisher: String
+    var date: String
+    var uci: String
+    var submissionEmail: String
+    var rights: String
+
+    static let empty = CopyrightPreset(title: "", author: "", publisher: "", date: "", uci: "", submissionEmail: "", rights: "")
+}
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow!
@@ -8,6 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var outputURL: URL?
     private var txtURL: URL?
     private var epubURL: URL?
+    private var activeProcess: Process?
+    private var conversionIsPaused = false
+    private var cancellationRequested = false
+    private var copyrightPresets: [String: CopyrightPreset] = [:]
 
     private let hwpxLabel = NSTextField(labelWithString: "선택되지 않음")
     private let coverLabel = NSTextField(labelWithString: "선택되지 않음")
@@ -25,8 +42,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let uciField = NSTextField(string: "")
     private let submissionEmailField = NSTextField(string: "")
     private let rightsField = NSTextField(string: "")
-    private let saveCopyrightButton = NSButton(title: "판권정보 저장하기", target: nil, action: nil)
+    private let copyrightPresetPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let saveCopyrightButton = NSButton(title: "새 프리셋 저장", target: nil, action: nil)
+    private let overwriteCopyrightButton = NSButton(title: "현재 프리셋 덮어쓰기", target: nil, action: nil)
+    private let deleteCopyrightButton = NSButton(title: "삭제", target: nil, action: nil)
     private let convertButton = NSButton(title: "TXT + EPUB 만들기", target: nil, action: nil)
+    private let pauseButton = NSButton(title: "일시중지", target: nil, action: nil)
+    private let cancelButton = NSButton(title: "취소", target: nil, action: nil)
     private let openTXTButton = NSButton(title: "TXT 열기", target: nil, action: nil)
     private let openEPUBButton = NSButton(title: "EPUB 열기", target: nil, action: nil)
     private let revealButton = NSButton(title: "결과 폴더 보기", target: nil, action: nil)
@@ -37,6 +59,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildWindow()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let process = activeProcess, process.isRunning else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "변환이 진행 중입니다"
+        alert.informativeText = "앱을 종료하면 현재 변환이 취소됩니다. 종료할까요?"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "종료하고 취소")
+        alert.addButton(withTitle: "계속 변환")
+        guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+        if conversionIsPaused {
+            _ = Darwin.kill(-process.processIdentifier, SIGCONT)
+        }
+        _ = Darwin.kill(-process.processIdentifier, SIGTERM)
+        return .terminateNow
     }
 
     private func buildMainMenu() {
@@ -68,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildWindow() {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 660, height: 780),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 870),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -120,6 +158,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let copyrightHelp = NSTextField(labelWithString: "입력하면 TXT와 EPUB의 마지막 판권 페이지에 적용됩니다. 비워두면 원고 내용을 사용합니다.")
         copyrightHelp.textColor = .secondaryLabelColor
         copyrightHelp.font = .systemFont(ofSize: 12)
+        copyrightPresetPopup.target = self
+        copyrightPresetPopup.action = #selector(copyrightPresetChanged)
+        saveCopyrightButton.target = self
+        saveCopyrightButton.action = #selector(saveCopyrightInfo)
+        overwriteCopyrightButton.target = self
+        overwriteCopyrightButton.action = #selector(overwriteCopyrightPreset)
+        deleteCopyrightButton.target = self
+        deleteCopyrightButton.action = #selector(deleteCopyrightPreset)
+        [saveCopyrightButton, overwriteCopyrightButton, deleteCopyrightButton].forEach { $0.bezelStyle = .rounded }
+        let presetRow = NSStackView(views: [copyrightPresetPopup, saveCopyrightButton, overwriteCopyrightButton, deleteCopyrightButton])
+        presetRow.orientation = .horizontal
+        presetRow.spacing = 8
         let copyrightForm = NSGridView(views: [
             [NSTextField(labelWithString: "제목"), titleField],
             [NSTextField(labelWithString: "지은이"), authorField],
@@ -135,14 +185,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         [titleField, authorField, publisherField, dateField, uciField, submissionEmailField, rightsField].forEach {
             $0.placeholderString = "선택 입력"
         }
-        saveCopyrightButton.target = self
-        saveCopyrightButton.action = #selector(saveCopyrightInfo)
-        saveCopyrightButton.bezelStyle = .rounded
-
         convertButton.target = self
         convertButton.action = #selector(convert)
         convertButton.bezelStyle = .rounded
         convertButton.keyEquivalent = "\r"
+        pauseButton.target = self
+        pauseButton.action = #selector(togglePauseConversion)
+        cancelButton.target = self
+        cancelButton.action = #selector(cancelConversion)
+        pauseButton.isEnabled = false
+        cancelButton.isEnabled = false
 
         spinner.style = .spinning
         spinner.controlSize = .small
@@ -160,14 +212,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         revealButton.action = #selector(revealResults)
         setResultButtons(enabled: false)
 
-        let actionRow = NSStackView(views: [convertButton, spinner])
+        let actionRow = NSStackView(views: [convertButton, pauseButton, cancelButton, spinner])
         actionRow.orientation = .horizontal
         actionRow.spacing = 10
         let resultRow = NSStackView(views: [openTXTButton, openEPUBButton, revealButton])
         resultRow.orientation = .horizontal
         resultRow.spacing = 10
 
-        let stack = NSStackView(views: [title, subtitle, form, copyrightTitle, copyrightHelp, copyrightForm, saveCopyrightButton, actionRow, statusLabel, resultRow])
+        let stack = NSStackView(views: [title, subtitle, form, copyrightTitle, copyrightHelp, presetRow, copyrightForm, actionRow, statusLabel, resultRow])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 16
@@ -181,7 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             copyrightForm.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
-        loadCopyrightInfo()
+        loadCopyrightPresets()
         inputModeChanged()
         templateChanged()
     }
@@ -266,8 +318,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showAlert("앱 내부 변환 엔진을 찾지 못했습니다.")
             return
         }
+        guard let launcher = Bundle.main.url(forResource: "epub_launcher", withExtension: nil) else {
+            showAlert("앱 내부 프로세스 런처를 찾지 못했습니다.")
+            return
+        }
 
         convertButton.isEnabled = false
+        pauseButton.isEnabled = false
+        cancelButton.isEnabled = false
+        pauseButton.title = "일시중지"
+        conversionIsPaused = false
+        cancellationRequested = false
         setResultButtons(enabled: false)
         spinner.startAnimation(nil)
         let templateName = templatePopup.indexOfSelectedItem == 1 ? "연재형" : "단행본형"
@@ -288,26 +349,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "--existing-policy", duplicatePopup.indexOfSelectedItem == 0 ? "overwrite" : "skip"
         ] : []
 
+        let process = Process()
+        let outputPipe = Pipe()
+        process.executableURL = launcher
+        process.arguments = [engine.path] + sourceArguments + [
+            "--cover", cover.path,
+            "--output-dir", output.path,
+        ] + copyrightArguments + batchArguments
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+        activeProcess = process
+
         DispatchQueue.global(qos: .userInitiated).async {
-            let process = Process()
-            let outputPipe = Pipe()
-            let errorPipe = Pipe()
-            process.executableURL = engine
-            process.arguments = sourceArguments + [
-                "--cover", cover.path,
-                "--output-dir", output.path,
-            ] + copyrightArguments + batchArguments
-            process.standardOutput = outputPipe
-            process.standardError = errorPipe
             do {
                 try process.run()
-                process.waitUntilExit()
-                let stdout = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                let stderr = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
                 DispatchQueue.main.async {
+                    if self.activeProcess === process {
+                        self.pauseButton.isEnabled = true
+                        self.cancelButton.isEnabled = true
+                    }
+                }
+                let combinedOutput = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                let stdout = String(data: combinedOutput, encoding: .utf8) ?? ""
+                let stderr = ""
+                DispatchQueue.main.async {
+                    let wasCancelled = self.cancellationRequested
+                    self.resetConversionControls()
                     self.spinner.stopAnimation(nil)
                     self.convertButton.isEnabled = true
-                    if process.terminationStatus == 0 {
+                    if wasCancelled {
+                        self.statusLabel.stringValue = "변환을 취소했습니다. 이미 완료된 결과 파일은 유지됩니다."
+                    } else if process.terminationStatus == 0 {
                         var summary: (Int, Int, Int)?
                         var warnings: [String] = []
                         for line in stdout.split(separator: "\n") {
@@ -358,6 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             } catch {
                 DispatchQueue.main.async {
+                    self.resetConversionControls()
                     self.spinner.stopAnimation(nil)
                     self.convertButton.isEnabled = true
                     self.statusLabel.stringValue = "변환에 실패했습니다."
@@ -365,6 +439,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    @objc private func togglePauseConversion() {
+        guard let process = activeProcess, process.isRunning else { return }
+        let signal = conversionIsPaused ? SIGCONT : SIGSTOP
+        guard Darwin.kill(-process.processIdentifier, signal) == 0 else {
+            showAlert("변환 프로세스의 상태를 변경하지 못했습니다.")
+            return
+        }
+        conversionIsPaused.toggle()
+        pauseButton.title = conversionIsPaused ? "재개" : "일시중지"
+        if conversionIsPaused {
+            spinner.stopAnimation(nil)
+            statusLabel.stringValue = "변환을 일시중지했습니다. 재개를 누르면 현재 지점부터 계속합니다."
+        } else {
+            spinner.startAnimation(nil)
+            statusLabel.stringValue = "변환을 재개했습니다…"
+        }
+    }
+
+    @objc private func cancelConversion() {
+        guard let process = activeProcess, process.isRunning else { return }
+        let alert = NSAlert()
+        alert.messageText = "변환을 취소할까요?"
+        alert.informativeText = "현재 처리 중인 파일은 완성되지 않을 수 있지만, 이미 완료된 일괄 결과는 유지됩니다."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "변환 취소")
+        alert.addButton(withTitle: "계속하기")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        cancellationRequested = true
+        pauseButton.isEnabled = false
+        cancelButton.isEnabled = false
+        statusLabel.stringValue = "변환을 취소하는 중입니다…"
+        if conversionIsPaused {
+            _ = Darwin.kill(-process.processIdentifier, SIGCONT)
+            conversionIsPaused = false
+        }
+        _ = Darwin.kill(-process.processIdentifier, SIGTERM)
+    }
+
+    private func resetConversionControls() {
+        activeProcess = nil
+        conversionIsPaused = false
+        cancellationRequested = false
+        pauseButton.title = "일시중지"
+        pauseButton.isEnabled = false
+        cancelButton.isEnabled = false
     }
 
     private func setResultButtons(enabled: Bool) {
@@ -385,19 +507,125 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
     }
 
-    private func loadCopyrightInfo() {
+    private let copyrightPresetStorageKey = "copyright.presets.v2"
+    private let selectedCopyrightPresetKey = "copyright.selectedPreset.v2"
+
+    private func currentCopyrightPreset() -> CopyrightPreset {
+        CopyrightPreset(
+            title: titleField.stringValue,
+            author: authorField.stringValue,
+            publisher: publisherField.stringValue,
+            date: dateField.stringValue,
+            uci: uciField.stringValue,
+            submissionEmail: submissionEmailField.stringValue,
+            rights: rightsField.stringValue
+        )
+    }
+
+    private func applyCopyrightPreset(_ preset: CopyrightPreset) {
+        titleField.stringValue = preset.title
+        authorField.stringValue = preset.author
+        publisherField.stringValue = preset.publisher
+        dateField.stringValue = preset.date
+        uciField.stringValue = preset.uci
+        submissionEmailField.stringValue = preset.submissionEmail
+        rightsField.stringValue = preset.rights
+    }
+
+    private func persistCopyrightPresets(selecting name: String) {
         let defaults = UserDefaults.standard
-        for (key, field) in copyrightFields {
-            field.stringValue = defaults.string(forKey: key) ?? ""
+        if let data = try? JSONEncoder().encode(copyrightPresets) {
+            defaults.set(data, forKey: copyrightPresetStorageKey)
         }
+        defaults.set(name, forKey: selectedCopyrightPresetKey)
+        copyrightPresetPopup.removeAllItems()
+        copyrightPresetPopup.addItems(withTitles: copyrightPresets.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending })
+        copyrightPresetPopup.selectItem(withTitle: name)
+        overwriteCopyrightButton.isEnabled = !copyrightPresets.isEmpty
+        deleteCopyrightButton.isEnabled = !copyrightPresets.isEmpty
+    }
+
+    private func loadCopyrightPresets() {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: copyrightPresetStorageKey),
+           let decoded = try? JSONDecoder().decode([String: CopyrightPreset].self, from: data),
+           !decoded.isEmpty {
+            copyrightPresets = decoded
+        } else {
+            var legacy = CopyrightPreset.empty
+            for (key, field) in copyrightFields {
+                field.stringValue = defaults.string(forKey: key) ?? ""
+            }
+            legacy = currentCopyrightPreset()
+            copyrightPresets = ["기본": legacy]
+        }
+        let requested = defaults.string(forKey: selectedCopyrightPresetKey) ?? "기본"
+        let selected = copyrightPresets[requested] != nil ? requested : copyrightPresets.keys.sorted().first!
+        persistCopyrightPresets(selecting: selected)
+        applyCopyrightPreset(copyrightPresets[selected] ?? .empty)
+    }
+
+    @objc private func copyrightPresetChanged() {
+        guard let name = copyrightPresetPopup.selectedItem?.title,
+              let preset = copyrightPresets[name] else { return }
+        applyCopyrightPreset(preset)
+        UserDefaults.standard.set(name, forKey: selectedCopyrightPresetKey)
+        statusLabel.stringValue = "‘\(name)’ 판권 프리셋을 불러왔습니다."
     }
 
     @objc private func saveCopyrightInfo() {
-        let defaults = UserDefaults.standard
-        for (key, field) in copyrightFields {
-            defaults.set(field.stringValue, forKey: key)
+        let alert = NSAlert()
+        alert.messageText = "새 판권 프리셋 저장"
+        alert.informativeText = "이 판권정보를 구분할 이름을 입력해 주세요."
+        alert.addButton(withTitle: "저장")
+        alert.addButton(withTitle: "취소")
+        let nameField = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        nameField.placeholderString = "예: 블랙인디고 기본 판권"
+        alert.accessoryView = nameField
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            showAlert("프리셋 이름을 입력해 주세요.")
+            return
         }
-        statusLabel.stringValue = "판권정보를 저장했습니다. 다음 실행 때 자동으로 불러옵니다."
+        if copyrightPresets[name] != nil {
+            let confirm = NSAlert()
+            confirm.messageText = "같은 이름의 프리셋이 있습니다"
+            confirm.informativeText = "‘\(name)’ 프리셋을 현재 입력 내용으로 덮어쓸까요?"
+            confirm.addButton(withTitle: "덮어쓰기")
+            confirm.addButton(withTitle: "취소")
+            guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        }
+        copyrightPresets[name] = currentCopyrightPreset()
+        persistCopyrightPresets(selecting: name)
+        statusLabel.stringValue = "‘\(name)’ 판권 프리셋을 저장했습니다."
+    }
+
+    @objc private func overwriteCopyrightPreset() {
+        guard let name = copyrightPresetPopup.selectedItem?.title else { return }
+        copyrightPresets[name] = currentCopyrightPreset()
+        persistCopyrightPresets(selecting: name)
+        statusLabel.stringValue = "‘\(name)’ 판권 프리셋을 현재 내용으로 덮어썼습니다."
+    }
+
+    @objc private func deleteCopyrightPreset() {
+        guard let name = copyrightPresetPopup.selectedItem?.title else { return }
+        let alert = NSAlert()
+        alert.messageText = "판권 프리셋을 삭제할까요?"
+        alert.informativeText = "‘\(name)’ 프리셋을 삭제합니다."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "삭제")
+        alert.addButton(withTitle: "취소")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        copyrightPresets.removeValue(forKey: name)
+        if copyrightPresets.isEmpty {
+            copyrightPresets["기본"] = .empty
+        }
+        let next = copyrightPresets.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.first!
+        persistCopyrightPresets(selecting: next)
+        applyCopyrightPreset(copyrightPresets[next] ?? .empty)
+        statusLabel.stringValue = "‘\(name)’ 판권 프리셋을 삭제했습니다."
     }
 
     @objc private func openTXT() { if let url = txtURL { NSWorkspace.shared.open(url) } }

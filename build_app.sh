@@ -36,10 +36,16 @@ xcrun --sdk macosx swiftc \
     -o "$ROOT_DIR/dist/HWPXEPUBMaker" \
     -framework AppKit -framework Foundation
 
+xcrun --sdk macosx clang \
+    -target arm64-apple-macosx11.0 \
+    "$ROOT_DIR/macos/process_launcher.c" \
+    -o "$ROOT_DIR/dist/epub_launcher"
+
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$ROOT_DIR/dist/HWPXEPUBMaker" "$APP_DIR/Contents/MacOS/HWPXEPUBMaker"
 cp "$ROOT_DIR/dist/epub_engine" "$APP_DIR/Contents/Resources/epub_engine"
+cp "$ROOT_DIR/dist/epub_launcher" "$APP_DIR/Contents/Resources/epub_launcher"
 cp "$ROOT_DIR/assets/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 cp "$ROOT_DIR/macos/Info.plist" "$APP_DIR/Contents/Info.plist"
 cp "$ROOT_DIR/THIRD_PARTY_NOTICES.txt" "$APP_DIR/Contents/Resources/THIRD_PARTY_NOTICES.txt"
@@ -50,6 +56,6 @@ cp -R "$ROOT_DIR/macos" "$APP_DIR/Contents/Resources/Source/macos"
 cp "$ROOT_DIR/build_app.sh" "$APP_DIR/Contents/Resources/Source/build_app.sh"
 cp "$ROOT_DIR/README.md" "$APP_DIR/Contents/Resources/Source/README.md"
 cp "$ROOT_DIR/CHANGELOG.md" "$APP_DIR/Contents/Resources/Source/CHANGELOG.md"
-chmod +x "$APP_DIR/Contents/MacOS/HWPXEPUBMaker" "$APP_DIR/Contents/Resources/epub_engine"
+chmod +x "$APP_DIR/Contents/MacOS/HWPXEPUBMaker" "$APP_DIR/Contents/Resources/epub_engine" "$APP_DIR/Contents/Resources/epub_launcher"
 codesign --force --deep --sign - "$APP_DIR"
 echo "$APP_DIR"
