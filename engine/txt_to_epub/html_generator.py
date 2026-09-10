@@ -87,7 +87,7 @@ def _render_text_blocks(content: str) -> str:
                 regular_lines.clear()
 
         for line in lines:
-            if re.fullmatch(r"\*\s+\*\s+\*", line):
+            if re.fullmatch(r"\*\s*\*\s*\*", line):
                 flush_regular_lines()
                 paragraphs.append('<p class="scene-break ridicenter">* * *</p>')
             else:
