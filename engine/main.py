@@ -67,13 +67,37 @@ def hwpx_to_txt(hwpx_path: Path, txt_path: Path) -> None:
         output.write(text)
 
 
-def apply_copyright_form(text: str, values: dict[str, str], fallback_title: str) -> str:
+def number_uci(uci: str, episode_number: Optional[int]) -> str:
+    """Append a four-digit episode sequence: G720:N+A569-20260901018 + 3 -> ....0003."""
+    uci = uci.strip()
+    if not uci or episode_number is None:
+        return uci
+    base = re.sub(r'\.\d+$', '', uci)
+    return f"{base}.{episode_number:04d}"
+
+
+def apply_copyright_form(
+    text: str,
+    values: dict[str, str],
+    fallback_title: str,
+    episode_number: Optional[int] = None,
+) -> str:
     """Replace or append a copyright block when the user entered form values."""
+    block = re.search(r'(?:^|\n)\s*판권\s*\n(?P<body>[\s\S]*?)\s*$', text)
     if not any(value.strip() for value in values.values()):
+        # Keep the manuscript's copyright block and only renumber its UCI line.
+        if block and episode_number is not None:
+            body = re.sub(
+                r'^(\s*UCI\s*[:：]\s*)(\S.*?)\s*$',
+                lambda match: match.group(1) + number_uci(match.group(2), episode_number),
+                block.group('body'),
+                count=1,
+                flags=re.MULTILINE,
+            )
+            text = text[:block.start('body')] + body + text[block.end('body'):]
         return text
 
     existing: dict[str, str] = {}
-    block = re.search(r'(?:^|\n)\s*판권\s*\n(?P<body>[\s\S]*?)\s*$', text)
     if block:
         for line in block.group('body').splitlines():
             field = re.match(r'^\s*([^:：]+)\s*[:：]\s*(.*?)\s*$', line)
@@ -102,6 +126,8 @@ def apply_copyright_form(text: str, values: dict[str, str], fallback_title: str)
     fields = []
     for label, key in labels:
         value = values.get(key, '').strip() or fallbacks[key]
+        if key == 'uci':
+            value = number_uci(value, episode_number)
         fields.append(f'{label}: {value}')
     # Keep copyright fields as separate paragraphs. This makes book EPUBs use
     # the same one-blank-line spacing as the dedicated serial copyright page.
@@ -199,6 +225,12 @@ def detect_episode_number(text: str) -> Optional[int]:
     """Read an episode number such as 1화, 01화, 001화 or 제1화 from the first line."""
     heading = detect_first_heading(text, '')
     match = re.search(r'(?:제\s*)?0*(\d{1,4})\s*화(?:\s|$)', heading)
+    return int(match.group(1)) if match else None
+
+
+def detect_filename_episode_number(stem: str) -> Optional[int]:
+    """Read an episode number from a file name such as 작품명_001화."""
+    match = re.search(r'0*(\d{1,4})\s*화\s*$', unicodedata.normalize('NFC', stem))
     return int(match.group(1)) if match else None
 
 
@@ -456,7 +488,11 @@ def convert_one(
 
     temporary_txt_path.replace(txt_path)
     source_text = txt_path.read_text(encoding='utf-8')
-    source_text = apply_copyright_form(source_text, copyright_values, hwpx_path.stem)
+    # The manuscript's first line is authoritative; the file name is a fallback.
+    uci_episode_number = detect_episode_number(source_text)
+    if uci_episode_number is None:
+        uci_episode_number = detect_filename_episode_number(hwpx_path.stem)
+    source_text = apply_copyright_form(source_text, copyright_values, hwpx_path.stem, uci_episode_number)
     with txt_path.open('w', encoding='utf-8', newline='\n') as output:
         output.write(source_text)
     optimized_cover = output_dir / f'.{output_stem}.optimized-cover.jpg'
